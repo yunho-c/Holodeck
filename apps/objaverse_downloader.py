@@ -6,6 +6,7 @@ based on a list of asset IDs.
 import objaverse.xl as oxl
 import pandas as pd
 from typing import List
+import os
 
 
 def download_assets(asset_ids: List[str]):
@@ -14,6 +15,7 @@ def download_assets(asset_ids: List[str]):
 
     Args:
         asset_ids (List[str]): A list of asset IDs to download.
+        prepend_path (bool): If True, prepends '~/.objaverse' to the file paths.
     """
     print("Getting Objaverse-XL annotations...")
     annotations = oxl.get_annotations()
@@ -22,8 +24,15 @@ def download_assets(asset_ids: List[str]):
 
     # The asset IDs from the retriever are typically part of the 'fileIdentifier' URL.
     # We can filter the DataFrame by checking if any of the asset IDs are in the 'fileIdentifier'.
+
+    # Per pandas performance best practices, we first extract the IDs using a
+    # vectorized operation, then filter using the highly-optimized .isin() method.
+    annotations["extracted_id"] = annotations["fileIdentifier"].str.extract(
+        r"([a-f0-9]{32})"
+    )
+    asset_ids_set = set(asset_ids)
     filtered_annotations = annotations[
-        annotations["fileIdentifier"].str.contains("|".join(asset_ids), na=False)
+        annotations["extracted_id"].isin(asset_ids_set)
     ]
 
     if filtered_annotations.empty:
@@ -31,14 +40,25 @@ def download_assets(asset_ids: List[str]):
             "Could not find any of the provided asset IDs in the Objaverse-XL annotations."
         )
         return
+    # filtered_annotations = annotations  # DEBUG
 
     print(f"Found {len(filtered_annotations)} matching objects. Starting download...")
 
     downloaded_files = oxl.download_objects(filtered_annotations)
 
+    # if prepend_path:
+    #     home_dir = os.path.expanduser("~")
+    #     objaverse_dir = os.path.join(home_dir, ".objaverse")
+    #     downloaded_files = {
+    #         uid: os.path.join(objaverse_dir, path)
+    #         for uid, path in downloaded_files.items()
+    #     }
+
     print("\nDownloaded files:")
     for uid, path in downloaded_files.items():
         print(f"  {uid}: {path}")
+    
+    return downloaded_files
 
 
 def test():
@@ -67,7 +87,7 @@ def test():
     ]
 
     print(f"Attempting to download {len(objaverse_uids)} objects from Objaverse-XL...")
-    download_assets(objaverse_uids)
+    download_assets(objaverse_uids, prepend_path=False)
 
 
 if __name__ == "__main__":

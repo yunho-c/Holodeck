@@ -27,6 +27,8 @@ compress-json==1.1.0
 black==23.12.1
 objathor
 editdistance==0.6.2
+pyrender
+trimesh
 
 # cvxpy
 # cchardet

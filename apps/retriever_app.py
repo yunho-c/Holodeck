@@ -1,7 +1,67 @@
+from pathlib import Path
+
 import gradio as gr
-from ai2holodeck.generation.objaverse_retriever import ObjathorRetriever
 import open_clip
 from sentence_transformers import SentenceTransformer
+import pyrender
+import trimesh
+import numpy as np
+from PIL import Image
+import os
+
+from ai2holodeck.generation.objaverse_retriever import ObjathorRetriever
+from apps.objaverse_downloader import download_assets
+
+
+def render_glb_to_jpg(glb_path, jpg_path):
+    """
+    Renders a .glb file to a .jpg image.
+    """
+    if not os.path.exists(os.path.dirname(jpg_path)):
+        os.makedirs(os.path.dirname(jpg_path))
+
+    # Load the scene from the .glb file
+    try:
+        trimesh_mesh = trimesh.load_mesh(glb_path)
+    except Exception as e:
+        print(f"Error loading {glb_path}: {e}")
+        return None
+
+    # Create a pyrender scene
+    mesh = pyrender.Mesh.from_trimesh(trimesh_mesh)
+    scene = pyrender.Scene()
+    scene.add(mesh)
+
+    # Add a camera
+    camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.0)
+
+    if scene.bounds is None or not np.all(np.isfinite(scene.bounds)):
+        print(f"Invalid scene bounds for {glb_path}")
+        return None
+
+    # camera_pose = scene.camera_transform
+    s = np.sqrt(2)/2
+    camera_pose = np.array([
+        [0.0, -s,   s,   0.3],
+        [1.0,  0.0, 0.0, 0.0],
+        [0.0,  s,   s,   0.35],
+        [0.0,  0.0, 0.0, 1.0],
+    ])
+    scene.add(camera, pose=camera_pose)
+
+    # Add a light
+    light = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
+    scene.add(light, pose=camera_pose)
+
+    # Render the scene
+    r = pyrender.OffscreenRenderer(400, 400)
+    color, _ = r.render(scene)
+    r.delete()
+
+    # Save the image
+    img = Image.fromarray(color)
+    img.save(jpg_path)
+    return jpg_path
 
 
 def main():
@@ -26,6 +86,14 @@ def main():
         retrieval_threshold=28,
     )
 
+    retriever = ObjathorRetriever(
+        clip_model=clip_model,
+        clip_preprocess=clip_preprocess,
+        clip_tokenizer=clip_tokenizer,
+        sbert_model=sbert_model,
+        retrieval_threshold=28,
+    )
+
     def search(query, threshold, use_text, size_x, size_y, size_z):
         retriever.use_text = use_text
         results = retriever.retrieve([query], threshold=threshold)
@@ -33,7 +101,19 @@ def main():
             results = retriever.compute_size_difference(
                 (size_x, size_y, size_z), results
             )
-        return [result[0] for result in results]
+        asset_ids = [result[0] for result in results]
+        assets = download_assets(asset_ids)  # downloads
+
+        image_paths = []
+        for id, path in assets.items():
+            image_path = path.replace(".glb", ".jpg")
+            render_glb_to_jpg(path, image_path)
+            image_paths.append(image_path)
+
+        return image_paths
+
+    def select(select_data: gr.SelectData):
+        return select_data.value
 
     with gr.Blocks() as demo:
         with gr.Row():
@@ -48,8 +128,14 @@ def main():
                     size_y_input = gr.Number(label="Size Y (cm)", value=0)
                     size_z_input = gr.Number(label="Size Z (cm)", value=0)
                 search_button = gr.Button("Search")
+                download_button = gr.Button("Download Top Result")
             with gr.Column():
                 output_gallery = gr.Gallery(label="Results")
+                model_output = gr.Model3D(label="3D Model")
+                download_status = gr.Textbox(label="Download Status")
+                select_output = gr.Textbox(label="Select Data")
+
+        output_gallery.select(select, None, select_output)
 
         search_button.click(
             fn=search,
@@ -64,6 +150,14 @@ def main():
             outputs=output_gallery,
         )
 
+        # download_button.click(
+        #     fn=download_and_display,
+        #     inputs=output_gallery,
+        #     outputs=[model_output, download_status],
+        # )
+
+    gr.set_static_paths(paths=[str(Path.home() / ".objaverse"), str(Path.cwd())])
+    # demo.launch(allowed_paths=[str(Path.home() / ".objaverse"), str(Path.cwd())])
     demo.launch()
 
 
