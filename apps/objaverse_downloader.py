@@ -8,6 +8,9 @@ import pandas as pd
 from typing import List
 import os
 
+print("Getting Objaverse-XL annotations...")
+annotations = oxl.get_annotations()
+
 
 def download_assets(asset_ids: List[str]):
     """
@@ -17,9 +20,6 @@ def download_assets(asset_ids: List[str]):
         asset_ids (List[str]): A list of asset IDs to download.
         prepend_path (bool): If True, prepends '~/.objaverse' to the file paths.
     """
-    print("Getting Objaverse-XL annotations...")
-    annotations = oxl.get_annotations()
-
     print(f"Filtering annotations for {len(asset_ids)} asset IDs...")
 
     # The asset IDs from the retriever are typically part of the 'fileIdentifier' URL.
@@ -31,9 +31,7 @@ def download_assets(asset_ids: List[str]):
         r"([a-f0-9]{32})"
     )
     asset_ids_set = set(asset_ids)
-    filtered_annotations = annotations[
-        annotations["extracted_id"].isin(asset_ids_set)
-    ]
+    filtered_annotations = annotations[annotations["extracted_id"].isin(asset_ids_set)]
 
     if filtered_annotations.empty:
         print(
@@ -44,7 +42,7 @@ def download_assets(asset_ids: List[str]):
 
     print(f"Found {len(filtered_annotations)} matching objects. Starting download...")
 
-    downloaded_files = oxl.download_objects(filtered_annotations)
+    downloaded_files = oxl.download_objects(filtered_annotations, processes=2)
 
     # if prepend_path:
     #     home_dir = os.path.expanduser("~")
@@ -57,7 +55,7 @@ def download_assets(asset_ids: List[str]):
     print("\nDownloaded files:")
     for uid, path in downloaded_files.items():
         print(f"  {uid}: {path}")
-    
+
     return downloaded_files
 
 
